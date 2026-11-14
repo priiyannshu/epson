@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0b1120">
+  <meta name="description" content="Epson L565 Cloudflare Print Spooler PWA - Print documents and photos from anywhere">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Epson Print">
+  
+  <title>Epson L565 Cloud Print</title>
+
+  <link rel="manifest" href="/manifest.webmanifest">
+  <link rel="icon" type="image/svg+xml" href="/icons/icon.svg">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
+
+  <!-- Inter Font -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+
+  <!-- PDF.js for Client-side PDF Visual Previews -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- Background Glow Accents -->
+  <div class="bg-glow bg-glow-blue"></div>
+  <div class="bg-glow bg-glow-purple"></div>
+
+  <div class="app-container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="brand-row">
+        <div class="brand-title-group">
+          <div class="brand-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 9V2h12v7"/>
+              <path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/>
+              <path d="M6 14h12v8H6z"/>
+              <circle cx="18" cy="12" r="1" fill="currentColor"/>
+            </svg>
+          </div>
+          <div>
+            <h1 class="brand-name">Epson L565</h1>
+            <p class="brand-sub">Cloud Spooler & AirPrint PWA</p>
+          </div>
+        </div>
+
+        <div id="printerStatusBadge" class="status-badge status-idle">
+          <span class="status-dot"></span>
+          <span id="printerStatusText">Connecting...</span>
+        </div>
+      </div>
+
+      <!-- Live Ink Levels Card -->
+      <div class="ink-card">
+        <div class="ink-header">
+          <span class="ink-title">LIVE INK LEVELS</span>
+          <span id="printerModelLabel" class="printer-model">Epson_L565_USB (Raspberry Pi 5)</span>
+        </div>
+        <div class="ink-grid">
+          <!-- Black -->
+          <div class="ink-col ink-black">
+            <div class="ink-label-row">
+              <span class="ink-tag">K</span>
+              <span class="ink-name">Black</span>
+              <span id="inkValBlack" class="ink-val">--%</span>
+            </div>
+            <div class="ink-bar-track">
+              <div id="inkBarBlack" class="ink-bar-fill" style="width: 0%"></div>
+            </div>
+          </div>
+          <!-- Cyan -->
+          <div class="ink-col ink-cyan">
+            <div class="ink-label-row">
+              <span class="ink-tag">C</span>
+              <span class="ink-name">Cyan</span>
+              <span id="inkValCyan" class="ink-val">--%</span>
+            </div>
+            <div class="ink-bar-track">
+              <div id="inkBarCyan" class="ink-bar-fill" style="width: 0%"></div>
+            </div>
+          </div>
+          <!-- Magenta -->
+          <div class="ink-col ink-magenta">
+            <div class="ink-label-row">
+              <span class="ink-tag">M</span>
+              <span class="ink-name">Magenta</span>
+              <span id="inkValMagenta" class="ink-val">--%</span>
+            </div>
+            <div class="ink-bar-track">
+              <div id="inkBarMagenta" class="ink-bar-fill" style="width: 0%"></div>
+            </div>
+          </div>
+          <!-- Yellow -->
+          <div class="ink-col ink-yellow">
+            <div class="ink-label-row">
+              <span class="ink-tag">Y</span>
+              <span class="ink-name">Yellow</span>
+              <span id="inkValYellow" class="ink-val">--%</span>
+            </div>
+            <div class="ink-bar-track">
+              <div id="inkBarYellow" class="ink-bar-fill" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Content Area -->
+    <main class="main-card">
+      <!-- File Upload / Dropzone -->
+      <section class="upload-section">
+        <input type="file" id="fileInput" accept=".pdf,image/png,image/jpeg,image/webp" class="visually-hidden">
+        
+        <div id="dropZone" class="drop-zone">
+          <div class="drop-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+              <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242M12 12v9m-4-4 4-4 4 4"/>
+            </svg>
+          </div>
+          <h2 class="drop-title">Drop your document or image here</h2>
+          <p class="drop-desc">Tap or drag files to print. Supports PDF, PNG, JPG, WEBP (up to 25MB)</p>
+          <button type="button" id="browseBtn" class="btn btn-secondary">Browse File</button>
+        </div>
+
+        <!-- Visual File Preview Card (Hidden until file selected) -->
+        <div id="previewCard" class="preview-card hidden">
+          <div class="preview-top-bar">
+            <div class="file-meta-group">
+              <span id="fileTypeBadge" class="badge badge-primary">PDF</span>
+              <div>
+                <h3 id="previewFileName" class="preview-file-name">document.pdf</h3>
+                <span id="previewFileSize" class="preview-file-size">1.2 MB</span>
+              </div>
+            </div>
+            <button type="button" id="changeFileBtn" class="btn btn-ghost btn-sm">Change File</button>
+          </div>
+
+          <div class="preview-canvas-wrapper">
+            <canvas id="pdfCanvas" class="preview-canvas hidden"></canvas>
+            <img id="imagePreview" class="preview-img hidden" alt="File preview">
+            <div id="previewLoading" class="preview-loading">
+              <div class="spinner"></div>
+              <span>Rendering preview...</span>
+            </div>
+          </div>
+          <div id="previewFooter" class="preview-footer hidden">
+            <span id="pdfPageCount" class="page-count-badge">Page 1 of 1</span>
+          </div>
+        </div>
+      </section>
+
+      <!-- Quick Presets Bar -->
+      <section class="presets-section">
+        <div class="section-label-row">
+          <span class="section-label">⚡ QUICK PRESETS</span>
+          <span id="activePresetBadge" class="active-preset-tag">Normal B&W</span>
+        </div>
+        <div class="presets-grid">
+          <!-- Preset 1: Normal B&W -->
+          <button type="button" class="preset-btn active" data-preset="normal-bw">
+            <div class="preset-icon">📄</div>
+            <div class="preset-info">
+              <div class="preset-name">Normal B&W</div>
+              <div class="preset-desc">A4 • Plain • Mono • Fit</div>
+            </div>
+          </button>
+
+          <!-- Preset 2: Color High -->
+          <button type="button" class="preset-btn" data-preset="color-high">
+            <div class="preset-icon">🎨</div>
+            <div class="preset-info">
+              <div class="preset-name">Color High</div>
+              <div class="preset-desc">A4 • High Quality • Color</div>
+            </div>
+          </button>
+
+          <!-- Preset 3: Photo 4x6 -->
+          <button type="button" class="preset-btn" data-preset="photo-4x6">
+            <div class="preset-icon">📸</div>
+            <div class="preset-info">
+              <div class="preset-name">Photo 4x6</div>
+              <div class="preset-desc">4x6" • Glossy Photo High</div>
+            </div>
+          </button>
+
+          <!-- Preset 4: Draft B&W -->
+          <button type="button" class="preset-btn" data-preset="draft-bw">
+            <div class="preset-icon">⚡</div>
+            <div class="preset-info">
+              <div class="preset-name">Draft B&W</div>
+              <div class="preset-desc">A4 • Fast Eco • Mono</div>
+            </div>
+          </button>
+        </div>
+      </section>
+
+      <!-- Detailed Settings Accordion -->
+      <section class="settings-section">
+        <button type="button" id="accordionToggle" class="accordion-toggle" aria-expanded="false">
+          <div class="accordion-title-group">
+            <svg class="gear-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+            </svg>
+            <span class="accordion-title">All Epson L565 Settings</span>
+          </div>
+          <svg class="chevron-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+
+        <div id="settingsPanel" class="settings-panel collapsed">
+          <div class="settings-grid">
+            <!-- 1. Paper Size -->
+            <div class="form-group">
+              <label for="pageSize" class="form-label">Paper Size</label>
+              <select id="pageSize" class="form-select">
+                <option value="A4" selected>A4 (210 × 297 mm)</option>
+                <option value="4X6FULL">4x6 in Photo Borderless (4X6FULL)</option>
+                <option value="2L">2L (5 × 7 in)</option>
+                <option value="A6">A6 (105 × 148 mm)</option>
+                <option value="A5">A5 (148 × 210 mm)</option>
+                <option value="B5">B5 (182 × 257 mm)</option>
+                <option value="L">L (3.5 × 5 in)</option>
+                <option value="INDEX5">Index Card 5x8 (INDEX5)</option>
+                <option value="8x10">Photo 8x10 in</option>
+                <option value="4X7">Photo 4x7 in</option>
+                <option value="Postcard">Postcard (100 × 148 mm)</option>
+                <option value="ENV10">Envelope #10</option>
+                <option value="ENVC6">Envelope C6</option>
+                <option value="Letter">US Letter (8.5 × 11 in)</option>
+                <option value="Legal">US Legal (8.5 × 14 in)</option>
+              </select>
+            </div>
+
+            <!-- 2. Media Type & Quality -->
+            <div class="form-group">
+              <label for="mediaType" class="form-label">Media Type & Quality</label>
+              <select id="mediaType" class="form-select">
+                <option value="PLAIN_NORMAL" selected>Plain Paper - Normal Quality</option>
+                <option value="PLAIN_HIGH">Plain Paper - High Quality</option>
+                <option value="PMMATT_NORMAL">Matte Photo Paper - Normal</option>
+                <option value="PMMATT_HIGH">Matte Photo Paper - High Quality</option>
+                <option value="PMPHOTO_NORMAL">Glossy Photo Paper - Normal</option>
+                <option value="PMPHOTO_HIGH">Glossy Photo Paper - High Quality</option>
+                <option value="PMPHOTO_DRAFT">Photo Paper - Fast Draft</option>
+                <option value="ENV_NORMAL">Envelope - Normal</option>
+                <option value="ENV_HIGH">Envelope - High Quality</option>
+              </select>
+            </div>
+
+            <!-- 3. Ink Mode -->
+            <div class="form-group">
+              <label class="form-label">Ink Mode</label>
+              <div class="segmented-control">
+                <button type="button" class="segmented-btn" data-ink="COLOR">
+                  <span>🎨 Color</span>
+                </button>
+                <button type="button" class="segmented-btn active" data-ink="MONO">
+                  <span>⬛ B&W (Mono)</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- 4. Copies -->
+            <div class="form-group">
+              <label for="copiesInput" class="form-label">Copies</label>
+              <div class="stepper">
+                <button type="button" id="copyMinus" class="stepper-btn" aria-label="Decrease copies">−</button>
+                <input type="number" id="copiesInput" class="stepper-input" value="1" min="1" max="99">
+                <button type="button" id="copyPlus" class="stepper-btn" aria-label="Increase copies">+</button>
+              </div>
+            </div>
+
+            <!-- 5. Orientation -->
+            <div class="form-group">
+              <label class="form-label">Orientation</label>
+              <div class="segmented-control">
+                <button type="button" class="segmented-btn active" data-orient="auto">Auto</button>
+                <button type="button" class="segmented-btn" data-orient="portrait">Portrait</button>
+                <button type="button" class="segmented-btn" data-orient="landscape">Landscape</button>
+              </div>
+            </div>
+
+            <!-- 6. Fit to Page -->
+            <div class="form-group">
+              <label class="form-label">Scaling</label>
+              <label class="toggle-switch">
+                <input type="checkbox" id="fitToPageToggle" checked>
+                <span class="toggle-slider"></span>
+                <span class="toggle-label">Fit to Printable Area</span>
+              </label>
+            </div>
+
+            <!-- 7. Page Range -->
+            <div class="form-group">
+              <label for="pageRange" class="form-label">Page Range</label>
+              <input type="text" id="pageRange" class="form-input" placeholder="e.g. 1-3, 5 or All" value="All">
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Print Action Bar -->
+      <section class="action-section">
+        <button type="button" id="printSubmitBtn" class="btn btn-primary btn-lg" disabled>
+          <span class="btn-icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M6 9V2h12v7"/>
+              <path d="M6 18H4a2 2 0 01-2-2v-5a2 2 0 012-2h16a2 2 0 012 2v5a2 2 0 01-2 2h-2"/>
+              <path d="M6 14h12v8H6z"/>
+            </svg>
+          </span>
+          <span id="printSubmitText">Select a File to Print</span>
+        </button>
+      </section>
+    </main>
+
+    <!-- Progress / Status Tracker Modal Overlay -->
+    <div id="progressModal" class="modal-overlay hidden">
+      <div class="modal-card">
+        <div class="modal-header">
+          <div class="modal-title-group">
+            <h3 class="modal-title">Epson Spool Tracker</h3>
+            <span id="trackerJobId" class="job-id-chip">job_...</span>
+          </div>
+        </div>
+
+        <!-- Multi-step Progression Tracker -->
+        <div class="stepper-tracker">
+          <!-- Step 1: Uploading -->
+          <div id="stepUpload" class="track-step active">
+            <div class="step-bullet">1</div>
+            <div class="step-meta">
+              <div class="step-title">Cloud Upload</div>
+              <div class="step-sub">Sending to Cloudflare KV</div>
+            </div>
+          </div>
+          <!-- Step 2: Queued -->
+          <div id="stepQueued" class="track-step">
+            <div class="step-bullet">2</div>
+            <div class="step-meta">
+              <div class="step-title">Spool Queue</div>
+              <div class="step-sub">Awaiting Pi 5 worker</div>
+            </div>
+          </div>
+          <!-- Step 3: Downloading -->
+          <div id="stepDownloading" class="track-step">
+            <div class="step-bullet">3</div>
+            <div class="step-meta">
+              <div class="step-title">Pi Dispatch</div>
+              <div class="step-sub">Agent fetching payload</div>
+            </div>
+          </div>
+          <!-- Step 4: Printing -->
+          <div id="stepPrinting" class="track-step">
+            <div class="step-bullet">4</div>
+            <div class="step-meta">
+              <div class="step-title">Hardware Print</div>
+              <div class="step-sub">CUPS -> Epson L565</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live Status Visual Indicator -->
+        <div class="status-indicator-box">
+          <div id="statusSpinner" class="spinner-large"></div>
+          <div id="statusIconDone" class="status-icon-done hidden">✓</div>
+          <div id="statusIconFailed" class="status-icon-failed hidden">✕</div>
+          
+          <h4 id="statusMessageHeading" class="status-heading">Uploading Document...</h4>
+          <p id="statusMessageDetail" class="status-detail">Please keep this window open while the file uploads.</p>
+        </div>
+
+        <!-- Action / Close -->
+        <div class="modal-actions">
+          <button type="button" id="modalCloseBtn" class="btn btn-secondary w-full hidden">Done / Print Another</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- PWA Install Banner -->
+    <div id="pwaInstallBanner" class="pwa-banner hidden">
+      <div class="pwa-banner-text">
+        <strong>Install Epson Print App</strong>
+        <span>Add to home screen for fast one-tap printing</span>
+      </div>
+      <button type="button" id="pwaInstallBtn" class="btn btn-sm btn-primary">Install</button>
+    </div>
+
+    <!-- Footer -->
+    <footer class="app-footer">
+      <p>Cloudflare Workers & KV Edge Spooler • Raspberry Pi 5 CUPS Spooler</p>
+    </footer>
+  </div>
+
+  <script src="/app.js"></script>
+</body>
+</html>

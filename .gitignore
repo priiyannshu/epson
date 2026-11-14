@@ -1,0 +1,10 @@
+# Dependencies & Build artifacts
+node_modules/
+.wrangler/
+dist/
+*.log
+
+# OS & Temp
+.DS_Store
+Thumbs.db
+*.tmp

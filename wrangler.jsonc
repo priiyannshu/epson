@@ -1,0 +1,20 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "epson-print",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-11-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS"
+  },
+  "kv_namespaces": [
+    {
+      "binding": "EPSON_PRINT_JOBS",
+      "id": "c4a2bd6973fd43b9809c69569a07bf5d"
+    }
+  ],
+  "vars": {
+    "AGENT_SECRET": "epson_pi5_secret_2026_x99"
+  }
+}
