@@ -1,4 +1,4 @@
-const CACHE_NAME = 'epson-pwa-v1';
+const CACHE_NAME = 'epson-pwa-v2';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
@@ -35,11 +35,17 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // CRITICAL: NEVER intercept non-GET requests (e.g. POST, PUT, DELETE).
+  // Intercepting POST requests with fetch(event.request) causes Safari/WebKit & Chromium
+  // to strip/truncate multipart FormData body streams, throwing boundary errors.
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
   const url = new URL(event.request.url);
 
-  // Never cache API calls
+  // Never intercept API calls
   if (url.pathname.startsWith('/api/')) {
-    event.respondWith(fetch(event.request));
     return;
   }
 

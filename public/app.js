@@ -101,13 +101,17 @@ async function updateTelemetry() {
     } else if (data.isOnline === false || data.state === 'offline') {
       printerStatusBadge.classList.add('status-offline');
       printerStatusText.textContent = 'Offline';
+    } else if (data.state === 'disabled') {
+      printerStatusBadge.classList.add('status-offline');
+      printerStatusText.textContent = 'Queue Paused';
     } else {
       printerStatusBadge.classList.add('status-idle');
       printerStatusText.textContent = 'Ready / Idle';
     }
 
     if (data.primary_printer) {
-      printerModelLabel.textContent = `${data.primary_printer} (Raspberry Pi 5)`;
+      const pName = data.primary_printer.replace(/_/g, ' ');
+      printerModelLabel.textContent = `${pName} (Raspberry Pi 5)`;
     }
 
     // Update Ink Gauges
@@ -412,6 +416,15 @@ pageRangeInput.addEventListener('input', (e) => {
   activePresetBadge.textContent = 'Custom';
 });
 
+function readFileAsBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = (err) => reject(err);
+    reader.readAsDataURL(file);
+  });
+}
+
 // 5. Print Execution & Progression Tracker
 printSubmitBtn.addEventListener('click', async () => {
   if (!selectedFile) return;
@@ -426,18 +439,52 @@ printSubmitBtn.addEventListener('click', async () => {
     statusMessageHeading.textContent = 'Uploading Document...';
     statusMessageDetail.textContent = 'Transferring file payload to Cloudflare KV Edge spool.';
 
-    const formData = new FormData();
-    formData.append('file', selectedFile);
-    formData.append('settings', JSON.stringify(currentSettings));
+    let res;
+    let uploadSuccess = false;
+    let lastError = null;
 
-    const res = await fetch('/api/print', {
-      method: 'POST',
-      body: formData,
-    });
+    // Strategy 1: Multipart/form-data upload
+    try {
+      const formData = new FormData();
+      formData.append('file', selectedFile);
+      formData.append('settings', JSON.stringify(currentSettings));
 
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({ error: 'Upload failed' }));
-      throw new Error(err.error || 'Server rejected file upload');
+      res = await fetch('/api/print', {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (res.ok) {
+        uploadSuccess = true;
+      } else {
+        const errJson = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        lastError = errJson.error || 'Upload rejected';
+      }
+    } catch (netErr) {
+      lastError = netErr.message;
+    }
+
+    // Strategy 2: Resilient Base64 JSON fallback (bypasses browser multipart boundary bugs)
+    if (!uploadSuccess) {
+      statusMessageDetail.textContent = 'Retrying upload via resilient data channel...';
+      const fileBase64 = await readFileAsBase64(selectedFile);
+      res = await fetch('/api/print', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          filename: selectedFile.name,
+          contentType: selectedFile.type || 'application/octet-stream',
+          fileBase64,
+          settings: currentSettings,
+        }),
+      });
+
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
+        throw new Error(errJson.error || lastError || 'Server rejected file upload');
+      }
     }
 
     const data = await res.json();

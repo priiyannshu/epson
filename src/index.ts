@@ -116,23 +116,11 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   // 1. POST /api/print - Submit new print job
   if (pathname === '/api/print' && method === 'POST') {
     const contentType = request.headers.get('content-type') || '';
-    if (!contentType.includes('multipart/form-data')) {
-      return errorResponse('Content-Type must be multipart/form-data', 400);
-    }
+    let fileBytes: ArrayBuffer | null = null;
+    let filename = '';
+    let mimeType = 'application/octet-stream';
 
-    const formData = await request.formData();
-    const file = formData.get('file');
-
-    if (!file || !(file instanceof File) || file.size === 0) {
-      return errorResponse('No file uploaded or file is empty', 400);
-    }
-
-    // Check file size (KV limit is 25MB per value)
-    if (file.size > 25 * 1024 * 1024) {
-      return errorResponse('File exceeds 25MB size limit', 400);
-    }
-
-    // Parse Settings
+    // Parse Settings with defaults
     let settings: PrintSettings = {
       pageSize: 'A4',
       mediaType: 'PLAIN_NORMAL',
@@ -143,23 +131,88 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
       pageRange: 'All',
     };
 
-    const settingsRaw = formData.get('settings');
-    if (typeof settingsRaw === 'string') {
+    if (contentType.includes('application/json')) {
+      const body = (await request.json().catch(() => ({}))) as {
+        fileBase64?: string;
+        filename?: string;
+        contentType?: string;
+        settings?: Partial<PrintSettings>;
+      };
+
+      if (!body.fileBase64) {
+        return errorResponse('Missing fileBase64 in request body', 400);
+      }
+
+      filename = body.filename || `document_${Date.now()}.pdf`;
+      mimeType = body.contentType || 'application/pdf';
+      if (body.settings && typeof body.settings === 'object') {
+        settings = { ...settings, ...body.settings };
+      }
+
+      // Decode base64 to ArrayBuffer
       try {
-        const parsed = JSON.parse(settingsRaw);
-        settings = { ...settings, ...parsed };
-      } catch {
-        // Fall back to defaults or individual form fields
+        const base64Data = body.fileBase64.replace(/^data:[^;]+;base64,/, '');
+        const binaryString = atob(base64Data);
+        const len = binaryString.length;
+        const bytes = new Uint8Array(len);
+        for (let i = 0; i < len; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        fileBytes = bytes.buffer;
+      } catch (decodeErr: unknown) {
+        const msg = decodeErr instanceof Error ? decodeErr.message : String(decodeErr);
+        return errorResponse(`Invalid base64 payload: ${msg}`, 400);
+      }
+    } else if (contentType.includes('multipart/form-data')) {
+      let formData: FormData;
+      try {
+        formData = await request.formData();
+      } catch (formErr: unknown) {
+        const msg = formErr instanceof Error ? formErr.message : String(formErr);
+        return errorResponse(`Malformed multipart upload: ${msg}. Try uploading again.`, 400);
+      }
+
+      const fileEntry = formData.get('file');
+      if (!fileEntry || typeof fileEntry === 'string') {
+        return errorResponse('No file uploaded or file is empty', 400);
+      }
+      const file = fileEntry as unknown as File;
+      if (!file.size || file.size === 0) {
+        return errorResponse('Uploaded file is empty', 400);
+      }
+
+      filename = file.name || `document_${Date.now()}.pdf`;
+      mimeType = file.type || 'application/octet-stream';
+      fileBytes = await file.arrayBuffer();
+
+      const settingsRaw = formData.get('settings');
+      if (typeof settingsRaw === 'string') {
+        try {
+          const parsed = JSON.parse(settingsRaw);
+          settings = { ...settings, ...parsed };
+        } catch {
+          // Fall back to defaults or individual form fields
+        }
+      } else {
+        if (formData.has('pageSize')) settings.pageSize = String(formData.get('pageSize'));
+        if (formData.has('mediaType')) settings.mediaType = String(formData.get('mediaType'));
+        if (formData.has('ink')) settings.ink = String(formData.get('ink'));
+        if (formData.has('copies')) settings.copies = Math.max(1, parseInt(String(formData.get('copies')), 10) || 1);
+        if (formData.has('orientation')) settings.orientation = String(formData.get('orientation'));
+        if (formData.has('fitToPage')) settings.fitToPage = String(formData.get('fitToPage')) === 'true';
+        if (formData.has('pageRange')) settings.pageRange = String(formData.get('pageRange'));
       }
     } else {
-      // Check individual fields if sent separately
-      if (formData.has('pageSize')) settings.pageSize = String(formData.get('pageSize'));
-      if (formData.has('mediaType')) settings.mediaType = String(formData.get('mediaType'));
-      if (formData.has('ink')) settings.ink = String(formData.get('ink'));
-      if (formData.has('copies')) settings.copies = Math.max(1, parseInt(String(formData.get('copies')), 10) || 1);
-      if (formData.has('orientation')) settings.orientation = String(formData.get('orientation'));
-      if (formData.has('fitToPage')) settings.fitToPage = String(formData.get('fitToPage')) === 'true';
-      if (formData.has('pageRange')) settings.pageRange = String(formData.get('pageRange'));
+      return errorResponse('Content-Type must be multipart/form-data or application/json', 400);
+    }
+
+    if (!fileBytes || fileBytes.byteLength === 0) {
+      return errorResponse('No file uploaded or file is empty', 400);
+    }
+
+    // Check file size (KV limit is 25MB per value)
+    if (fileBytes.byteLength > 25 * 1024 * 1024) {
+      return errorResponse('File exceeds 25MB size limit', 400);
     }
 
     // Generate unique Job ID
@@ -167,12 +220,8 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
     const jobId = `job_${Date.now()}_${randomHex}`;
 
     // Extract filename and extension
-    const filename = file.name || `document_${randomHex}.pdf`;
     const parts = filename.split('.');
     const extension = parts.length > 1 ? (parts.pop()?.toLowerCase() || 'pdf') : 'pdf';
-
-    // Read file bytes
-    const fileBytes = await file.arrayBuffer();
 
     // Save raw file in KV with 1-hour expiration
     await env.EPSON_PRINT_JOBS.put(`file:${jobId}`, fileBytes, {
@@ -184,7 +233,7 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
       id: jobId,
       filename,
       extension,
-      contentType: file.type || 'application/octet-stream',
+      contentType: mimeType,
       size: fileBytes.byteLength,
       settings,
       status: 'queued',
@@ -247,19 +296,29 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
     let candidateJob: JobMetadata | null = null;
     let candidateId: string | null = null;
     const remainingQueue: string[] = [];
+    const now = Date.now();
 
     for (const qId of queue) {
-      if (!candidateJob) {
-        const j = await env.EPSON_PRINT_JOBS.get<JobMetadata>(`job:${qId}`, { type: 'json' });
-        if (j && (j.status === 'queued' || j.status === 'downloading')) {
+      const j = await env.EPSON_PRINT_JOBS.get<JobMetadata>(`job:${qId}`, { type: 'json' });
+      if (!j || j.status === 'completed' || j.status === 'failed') {
+        // Prune completed/failed/missing jobs from queue
+        continue;
+      }
+
+      // Check if job is pending initial dispatch
+      if (!candidateJob && j.status === 'queued') {
+        candidateJob = j;
+        candidateId = qId;
+      } else if (!candidateJob && j.status === 'downloading') {
+        // If downloading for more than 90 seconds without transitioning to printing, re-dispatch
+        const jobAge = now - new Date(j.createdAt).getTime();
+        if (jobAge > 90000) {
           candidateJob = j;
           candidateId = qId;
-          remainingQueue.push(qId);
         }
-        // If job metadata is missing or already finished, omit from remainingQueue
-      } else {
-        remainingQueue.push(qId);
       }
+
+      remainingQueue.push(qId);
     }
 
     // Save cleaned queue if entries were pruned
@@ -427,6 +486,19 @@ async function handleApi(request: Request, env: Env, url: URL): Promise<Response
   if (pathname === '/api/queue' && method === 'GET') {
     const queue: string[] = (await env.EPSON_PRINT_JOBS.get('queue', { type: 'json' })) || [];
     return jsonResponse({ queue, count: queue.length });
+  }
+
+  // 9. POST /api/queue/clear - Cancel and purge all queued jobs
+  if ((pathname === '/api/queue/clear' || pathname === '/api/queue') && method === 'POST') {
+    const queue: string[] = (await env.EPSON_PRINT_JOBS.get('queue', { type: 'json' })) || [];
+    for (const qId of queue) {
+      await Promise.all([
+        env.EPSON_PRINT_JOBS.delete(`file:${qId}`),
+        env.EPSON_PRINT_JOBS.put(`job:${qId}`, JSON.stringify({ status: 'failed', error: 'Canceled by user' })),
+      ]);
+    }
+    await env.EPSON_PRINT_JOBS.put('queue', JSON.stringify([]));
+    return jsonResponse({ success: true, message: `Purged ${queue.length} jobs from queue` });
   }
 
   return errorResponse('Not Found', 404);
